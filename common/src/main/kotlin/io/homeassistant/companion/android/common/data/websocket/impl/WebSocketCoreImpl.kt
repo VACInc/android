@@ -66,6 +66,7 @@ import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.DelicateCoroutinesApi
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.channels.awaitClose
@@ -82,6 +83,7 @@ import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonElement
@@ -115,7 +117,7 @@ private val MAX_DELAY_BEFORE_RECONNECT = 2.minutes
  *
  * #### Connection lifecycle:
  * - The WebSocket connection will automatically close itself after the last subscription created with [subscribeTo] is dismissed.
- * - Calling [sendMessage] will open the connection if it is closed. Once the connection is open, it remains open and does not close automatically.
+ * - Calling [sendMessage] will open the connection if it is closed. An idle connection closes after one-off calls complete when no subscriptions remain.
  * - If the connection is lost or closed, the implementation waits for [DELAY_BEFORE_RECONNECT] before attempting to reconnect.
  *
  * #### Reconnection and re-subscription:
@@ -225,6 +227,7 @@ internal class WebSocketCoreImpl(
      * between multiples [connect] and [handleClosingSocket].
      */
     private val connectedMutex = Mutex()
+    private var pendingCalls = 0
 
     /**
      * Protects subscription operations to ensure only one subscription is created
@@ -381,8 +384,9 @@ internal class WebSocketCoreImpl(
      *
      * New connection attempts can be made after this call.
      */
-    private fun close(code: Int, reason: String?) = wsScope.launch {
+    private fun close(code: Int, reason: String?, onlyIfIdle: Boolean = false) = wsScope.launch {
         connectedMutex.withLock {
+            if (onlyIfIdle && (pendingCalls != 0 || activeMessages.isNotEmpty())) return@withLock
             // An intentional close also stops the restore loop, otherwise a shutdown could
             // leave it running and re-establishing the connection that was just closed
             reconnectJob?.cancel()
@@ -586,6 +590,21 @@ internal class WebSocketCoreImpl(
     }
 
     private suspend fun sendMessage(command: Command.WithAnswer): RawMessageSocketResponse? {
+        connectedMutex.withLock { pendingCalls++ }
+        try {
+            return sendMessageAndWait(command)
+        } finally {
+            withContext(NonCancellable) {
+                connectedMutex.withLock { pendingCalls-- }
+            }
+            backgroundScope.launch {
+                delay(5.seconds)
+                close(1001, "One-off calls complete.", onlyIfIdle = true)
+            }
+        }
+    }
+
+    private suspend fun sendMessageAndWait(command: Command.WithAnswer): RawMessageSocketResponse? {
         if (!connect()) {
             Timber.w("Unable to send message, not connected: ${sensitive { command.request.toString() }}")
             return null

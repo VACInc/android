@@ -515,6 +515,18 @@ class WebSocketCoreImplTest {
     @Nested
     inner class SendMessage {
         @Test
+        fun `one off request closes idle socket`() = runTest {
+            setupServer()
+            prepareAuthenticationAnswer()
+            assertTrue(webSocketCore.connect())
+            mockResultSuccessForId(2)
+            webSocketCore.sendMessage(mapOf("type" to "test"))
+            testScheduler.advanceTimeBy(5.seconds)
+            testScheduler.runCurrent()
+            verify { mockConnection.close(1001, "One-off calls complete.") }
+        }
+
+        @Test
         fun `Given an Active connection that responds to a request When sendMessage is invoked Then it returns a socketResponse and removes the Active message`() = runTest {
             setupServer()
             prepareAuthenticationAnswer()
