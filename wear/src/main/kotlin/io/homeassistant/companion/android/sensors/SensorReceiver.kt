@@ -33,6 +33,14 @@ class SensorReceiver : SensorReceiverBase() {
     // Suppress Lint because we only register for the receiver if the android version matches the intent
     @SuppressLint("InlinedApi")
     override val skippableActions = mapOf(
+        WifiManager.NETWORK_STATE_CHANGED_ACTION to listOf(
+            NetworkSensorManager.wifiConnection.id,
+            NetworkSensorManager.bssidState.id,
+            NetworkSensorManager.wifiIp.id,
+            NetworkSensorManager.wifiLinkSpeed.id,
+            NetworkSensorManager.wifiSignalStrength.id,
+            NetworkSensorManager.wifiFrequency.id,
+        ),
         WifiManager.WIFI_STATE_CHANGED_ACTION to listOf(NetworkSensorManager.wifiState.id),
         "android.app.action.NEXT_ALARM_CLOCK_CHANGED" to listOf(NextAlarmManager.nextAlarm.id),
         Intent.ACTION_SCREEN_OFF to listOf(PowerSensorManager.interactiveDevice.id),
