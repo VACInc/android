@@ -17,7 +17,10 @@ import io.homeassistant.companion.android.common.data.websocket.impl.entities.Ne
 import io.homeassistant.companion.android.common.util.MDI_PREFIX
 import io.homeassistant.companion.android.common.util.fromHaName
 import javax.inject.Inject
+import javax.inject.Singleton
 import kotlin.coroutines.cancellation.CancellationException
+import kotlin.time.Duration.Companion.minutes
+import kotlin.time.TimeSource
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.coroutineScope
@@ -27,6 +30,8 @@ import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.merge
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import timber.log.Timber
 
 /**
@@ -45,7 +50,22 @@ import timber.log.Timber
  * The `observe`/`snapshot` variants resolve from the entity registry only; the `*InContext`
  * variants also resolve the area, floor and device registries into an [EntityDisplayWithContext].
  */
+@Singleton
 class EntitiesForDisplayManager @Inject constructor(private val serverManager: ServerManager) {
+
+    private val registryMutex = Mutex()
+    private val registryCache = mutableMapOf<Int, Pair<TimeSource.Monotonic.ValueTimeMark, EntityRegistryEntries>>()
+
+    private suspend fun snapshotRegistry(serverId: Int): EntityRegistryEntries = registryMutex.withLock {
+        registryCache[serverId]?.let { (time, entries) ->
+            if (time.elapsedNow() < 5.minutes) return@withLock entries
+        }
+        val entries = serverManager.webSocketRepositoryOrNull(serverId).fetchEntityRegistryEntries()
+        if (entries.available) {
+            registryCache[serverId] = TimeSource.Monotonic.markNow() to entries
+        }
+        entries
+    }
 
     /**
      * Observes [entityIds] with their display information, or every entity of the server when it is
@@ -115,7 +135,7 @@ class EntitiesForDisplayManager @Inject constructor(private val serverManager: S
             return@flow
         }
 
-        val registryEntries = serverManager.webSocketRepositoryOrNull(serverId).fetchEntityRegistryEntries()
+        val registryEntries = snapshotRegistry(serverId)
         emit(EntityDisplayState.Loaded(entities.map { registryEntries.itemFor(it) }))
     }.flowOn(Dispatchers.Default)
 
@@ -444,6 +464,8 @@ private class EntityRegistryEntries(
     private val entityCategories: Map<Int, String> = emptyMap(),
     private val classicEntries: Map<String, EntityRegistryResponse>? = null,
 ) {
+    val available: Boolean get() = displayEntries != null || classicEntries != null
+
     /** Display entry of [entityId], for the callers needing what only it holds (area, device). */
     fun displayEntry(entityId: String): EntityRegistryDisplayEntry? = displayEntries?.get(entityId)
 

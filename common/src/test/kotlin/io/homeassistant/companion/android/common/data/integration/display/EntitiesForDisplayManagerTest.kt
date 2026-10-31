@@ -50,6 +50,14 @@ class EntitiesForDisplayManagerTest {
     private val integrationRepository: IntegrationRepository = mockk()
     private lateinit var manager: EntitiesForDisplayManager
 
+    @Test
+    fun `consecutive complication snapshots share the registry`() = runTest {
+        givenRegistryName("Bed")
+        repeat(2) { manager.snapshot(serverId, entityIds).collect {} }
+        coVerify(exactly = 1) { webSocketRepository.getEntityRegistryDisplay() }
+        coVerify(exactly = 2) { integrationRepository.getEntity("light.bed") }
+    }
+
     private val serverId = 1
 
     @AfterEach
