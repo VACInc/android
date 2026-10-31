@@ -3,6 +3,12 @@ plugins {
 }
 
 android {
+    buildTypes.named("release") {
+        isMinifyEnabled = true
+        isShrinkResources = true
+        proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
+    }
+
     defaultConfig {
         minSdk = libs.versions.androidSdk.wear.min.get().toInt()
         targetSdk = libs.versions.androidSdk.wear.target.get().toInt()
