@@ -21,6 +21,9 @@ class ComplicationReceiver : BroadcastReceiver() {
     @Inject
     lateinit var serverManager: ServerManager
 
+    @Inject
+    lateinit var refreshGate: ComplicationRefreshGate
+
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
 
     override fun onReceive(context: Context, intent: Intent) {
@@ -50,7 +53,7 @@ class ComplicationReceiver : BroadcastReceiver() {
     }
 
     private suspend fun onScreenOn(context: Context) {
-        if (!serverManager.isRegistered()) return
+        if (!serverManager.isRegistered() || !refreshGate.shouldRefresh()) return
         updateAllComplications(context)
     }
 
