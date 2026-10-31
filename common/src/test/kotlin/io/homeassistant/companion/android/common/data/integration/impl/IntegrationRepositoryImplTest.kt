@@ -72,6 +72,27 @@ class IntegrationRepositoryImplTest {
     }
 
     @Test
+    fun `sensor sync reuses config across calls`() = runTest {
+        every { server.connection } returns ServerConnectionInfo(externalUrl = "http://homeassistant:8123")
+        val config = io.homeassistant.companion.android.common.data.websocket.impl.entities.GetConfigResponse(
+            0.0,
+            0.0,
+            0.0,
+            emptyMap(),
+            "Home",
+            "UTC",
+            emptyList(),
+            "2026.10.0",
+        )
+        coEvery { integrationService.getConfig(any(), any()) } returns config
+        coEvery { serverManager.updateServer(any()) } returns Unit
+        coEvery { localStorage.putLong(any(), any()) } returns Unit
+        assertEquals(config, repository.getConfig())
+        assertEquals(config, repository.getConfig())
+        coVerify(exactly = 1) { integrationService.getConfig(any(), any()) }
+    }
+
+    @Test
     fun `Given an empty response when invoking renderTemplate then it returns an empty string`() = runTest {
         val expectedResult = ""
         coEvery { integrationService.getTemplate(any(), any()) } returns JsonObject(mapOf("template" to JsonPrimitive(expectedResult)))

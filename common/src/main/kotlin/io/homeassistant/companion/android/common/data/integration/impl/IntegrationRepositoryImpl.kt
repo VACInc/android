@@ -53,11 +53,15 @@ import io.homeassistant.companion.android.di.qualifiers.NamedManufacturer
 import io.homeassistant.companion.android.di.qualifiers.NamedModel
 import io.homeassistant.companion.android.di.qualifiers.NamedOsVersion
 import java.util.concurrent.TimeUnit
+import kotlin.time.Duration.Companion.hours
+import kotlin.time.TimeSource
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.filter
 import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.contentOrNull
 import okhttp3.HttpUrl
@@ -383,8 +387,14 @@ class IntegrationRepositoryImpl @AssistedInject constructor(
         return version?.isAtLeast(year, month, release) ?: false
     }
 
-    override suspend fun getConfig(): GetConfigResponse {
-        return tryOnUrls("get_config") { url ->
+    private val configMutex = Mutex()
+    private var cachedConfig: Pair<TimeSource.Monotonic.ValueTimeMark, GetConfigResponse>? = null
+
+    override suspend fun getConfig(): GetConfigResponse = configMutex.withLock {
+        cachedConfig?.let { (time, config) ->
+            if (time.elapsedNow() < 4.hours) return@withLock config
+        }
+        tryOnUrls("get_config") { url ->
             integrationService.getConfig(url, GetConfigIntegrationRequest)
         }.also { response ->
             updateServerWithConfig(response)
@@ -392,6 +402,7 @@ class IntegrationRepositoryImpl @AssistedInject constructor(
                 "${serverId}_$PREF_CHECK_SENSOR_REGISTRATION_NEXT",
                 System.currentTimeMillis() + TimeUnit.HOURS.toMillis(4),
             )
+            cachedConfig = TimeSource.Monotonic.markNow() to response
         }
     }
 
